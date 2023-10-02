@@ -1,6 +1,6 @@
 # Blackbox 
 
-This project is a Python-based implementation of Feed-Forward Neural Networks (FNN) and Recurrent Neural Networks (RNN) for modeling dynamic systems. The project is part of a thesis focusing on the application of neural networks to model magnetic braking systems (also known as Eddy current brakes) and their dynamic behavior based on experimental data readings.
+This project is a Python-based implementation of Feed-Forward Neural Networks (FNN) and Recurrent Neural Networks (RNN) for modeling dynamical systems. The project is part of a thesis focusing on the application of neural networks to model magnetic braking systems (also known as Eddy current brakes) and their dynamic behavior based on experimental data readings.
 
 While the primary focus is on magnetic brakes, the architecture of this software is designed to be versatile. Theoretically, this project can be used to model any dynamical system or even any system whose inputs and outputs can be measured. To do so, you will only need to modify the [`data_processing.py`](utils/data_processing.py) file to suit your projects.
 
