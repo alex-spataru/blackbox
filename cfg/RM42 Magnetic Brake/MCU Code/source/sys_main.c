@@ -151,14 +151,14 @@ typedef enum {
  * @brief Struct to encapsulate the current state of the system
  */
 typedef struct {
-    int periodA;        /**< The RPM of the motor. */
-    int periodB;        /**< The RPM of the motor. */
+    int periodA;        /**< The period of the first encoder. */
+    int periodB;        /**< The period of the second encoder. */
     int temperature;    /**< The temperature of the magnetic brake */
-    int currentMtrA;    /**< The average current reading. */
-    int currentMtrB;    /**< The average current reading. */
-    int currentMtrC;    /**< The average current reading. */
-    int totalCurrent;   /**< The average current reading. */
-    int reference;      /**< Duty cycle of the ESC. */
+    int currentMtrA;    /**< Motor phase A current reading. */
+    int currentMtrB;    /**< Motor phase B current reading. */
+    int currentMtrC;    /**< Motor phase A current reading. */
+    int totalCurrent;   /**< Total current consumption. */
+    int reference;      /**< Speed reference (0-100) */
     float distance;     /**< Distance setting in mm during the test. */
     TestMode mode;      /**< Current operation mode. */
 } SystemState;
@@ -178,9 +178,9 @@ static SystemState STATE;
 /**
  * @brief A semaphore used to ensure mutual exclusion when accessing shared resources.
  *
- * MUTEX is particularly useful when multiple tasks or threads might access
- * or modify shared resources (like STATE) concurrently. By using this semaphore,
- * the system can avoid race conditions and ensure data consistency.
+ * MUTEX is particularly useful when multiple tasks might access or modify shared resources 
+ * (like STATE) concurrently. By using this semaphore, the system can avoid race conditions 
+ * and ensure data consistency.
  */
 static SemaphoreHandle_t MUTEX;
 
@@ -284,8 +284,6 @@ void serial_task(void *pvParameters) {
     // Initialize task variables
     uint8 buffer[1024];
     const char* format = "$%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d;\r\n";
-
-    // Reference, Distance, Total Current, Current Motor A, Current Motor B, Current Motor C, Temperature, Period A, Period B, Mode, Runtime*/
 
     // Wait for sensor calibration to end
     vTaskDelay(pdMS_TO_TICKS(15000));
@@ -411,7 +409,7 @@ void bldc_task(void *pvParameters) {
  * @brief Task for reading and filtering the encoder RPM values.
  *
  * This task is responsible for:
- * - Reading the RPM from the encoder using the HET capture signal
+ * - Reading the encoder period using the HET capture signal
  * - Updating the global state structure with the calculated RPM value
  *
  * @param pvParameters Task parameters (not used).
@@ -446,18 +444,7 @@ void encoder_task(void *pvParameters) {
 /**
  * @brief Performs system identification on the motor.
  *
- * This task is designed to identify the response of a motor to various input signals:
- * a step function, a ramp, and a sinusoidal wave. After each identification sequence,
- * the motor is stopped for a short duration.
- *
- * The system identification process involves:
- * 1. Stopping the motor.
- * 2. Applying a step function input.
- * 3. Stopping the motor again.
- * 4. Applying a ramp function input.
- * 5. Stopping the motor.
- * 6. Applying a sinusoidal input for a predefined number of repetitions.
- * 7. Finally, stopping the motor.
+ * This task is designed to identify the response of the motor to a step function.
  *
  * @param pvParameters Standard task parameter (not used).
  *
