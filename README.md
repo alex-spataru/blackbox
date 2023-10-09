@@ -52,6 +52,8 @@ Below are the architectures for the Feed-Forward and Recurrent Neural Networks u
 **RNN Architecture:** 
 ![RNN Architecture](doc/rnn_architecture.png)
 
+Thanks to the feedback mechanism, the models **do not require a time input** in order to correctly predict the behavior of the system (T_i stands for temperature readings). In other words, the trained models are able to represent and generalize the actual behavior of the system (instead of just creating a linear regression of the training data).
+
 #### Training Process
 
 The image below provides an overview of the entire training process:
