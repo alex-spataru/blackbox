@@ -150,9 +150,15 @@ def compare_predictions_with_experimental_data():
     to make predictions and then plots these predictions for comparison.
     """
     test_case = input('Enter the test case CSV filename (without extension): ')
-    segment_path = os.path.join(cfg.training_data_path, test_case + '.csv')
+    # Prefer held-out files for honest comparison; fall back to training data
+    # so the menu option still works for ad-hoc inspection.
+    candidates = [
+        os.path.join(cfg.held_out_path, test_case + '.csv'),
+        os.path.join(cfg.training_data_path, test_case + '.csv'),
+    ]
+    segment_path = next((p for p in candidates if os.path.exists(p)), None)
 
-    if os.path.exists(segment_path):
+    if segment_path is not None:
         clear_screen()
         executor = ModelExecutor()
         df = pd.read_csv(segment_path, encoding=cfg.csv_encoding).astype('float32')
@@ -160,7 +166,7 @@ def compare_predictions_with_experimental_data():
         plot_comparison(df, predictions, test_case, False)
 
     else:
-        print(f'Test case CSV {test_case} not found!')
+        print(f'Test case CSV {test_case} not found in held-out or training data!')
 
 def execute_test_vector():
     from utils.test_vector import parse_def_file
@@ -190,16 +196,18 @@ def predict_all():
     from utils.plotting import plot_comparison
 
     """
-    The function iterates through all the test case files in the configured 
-    path, makes predictions using the ModelExecutor class, and then plots 
+    The function iterates through all the test case files in the configured
+    path, makes predictions using the ModelExecutor class, and then plots
     these predictions.
     """
+    # Load the model once; the previous implementation rebuilt it per file.
+    executor = ModelExecutor()
+
     # Plot all test cases
     csv_files = [f for f in os.listdir(cfg.test_cases_path) if f.endswith('.csv')]
     for case in sorted(csv_files):
         csv = os.path.join(cfg.test_cases_path, case)
         print(f'-> Running predictions for "{csv}"')
-        executor = ModelExecutor()
         df = pd.read_csv(csv, encoding=cfg.csv_encoding).astype('float32')
         predictions = executor.predict(df)
         plot_comparison(df, predictions, case, True)
@@ -215,15 +223,16 @@ def delete_generated_files():
     images, and test cases.
     """
     paths_to_clean = [
-        cfg.model_save_path, 
-        cfg.plot_save_path, 
+        cfg.model_save_path,
+        cfg.plot_save_path,
         cfg.test_cases_path,
-        cfg.training_data_path
+        cfg.training_data_path,
+        cfg.held_out_path,
     ]
 
-    ack = input('Are you sure (y/n): ')
+    ack = input('Are you sure (y/n): ').strip().lower()
 
-    if ack == 'y' or ack == 'Y':
+    if ack == 'y':
         for path in paths_to_clean:
             if os.path.exists(path):
                 if os.path.isfile(path):
@@ -234,7 +243,7 @@ def delete_generated_files():
             else:
                 print(f'-> {path} does not exist.')
 
-    elif ack != 'n' or ack != 'N':
+    elif ack != 'n':
         print('Invalid response...')
 
 #-------------------------------------------------------------------------------
@@ -298,7 +307,11 @@ if __name__ == '__main__':
         print(f'Error: cannot load application config.json file!')
         exit(1)
 
-    # Load configuration file & show main menu
+    # Load configuration file & seed RNGs for reproducibility
     cfg.load_config(os.path.join('cfg', selected_config_file))
+    from utils.model_generator import set_seed
+    set_seed(cfg.seed)
+
+    # Show main menu
     main_menu(selected_config_file)
 

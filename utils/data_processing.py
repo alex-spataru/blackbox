@@ -250,12 +250,11 @@ def save_test_case(data, mode, columns):
     output_name = f'{mode}_R{ref:.0f}_D{dst:.2f}_T{tmp:.2f}.csv'
 
     # Set all RPM values to 0 before the initial RPM rise
-    for _ in range(0, 2):
-        initial_rise_index_complex = find_initial_complex_rise(df['RPM'])
-        if initial_rise_index_complex is not None:
-            first_non_zero = df['RPM'].ne(0).idxmax()
-            df.loc[first_non_zero:initial_rise_index_complex, 'RPM'] = 0
-            df.reset_index(drop=True, inplace=True)
+    initial_rise_index_complex = find_initial_complex_rise(df['RPM'])
+    if initial_rise_index_complex is not None:
+        first_non_zero = df['RPM'].ne(0).idxmax()
+        df.loc[first_non_zero:initial_rise_index_complex, 'RPM'] = 0
+        df.reset_index(drop=True, inplace=True)
 
     # Trim data to the 2 seconds after the RPM signal stabilizes
     rpm_stabilized_index = find_stabilization_index(df, 'RPM', 50, 50)

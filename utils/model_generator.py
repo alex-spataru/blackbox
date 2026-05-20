@@ -1,16 +1,16 @@
-# 
+#
 # Copyright (c) 2023 Alex Spataru <https://github.com/alex-spataru>
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the 'Software'), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -18,27 +18,75 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-# 
+#
 
 import os
-import copy
-import torch
+import json
+import random
 import shutil
+
+import numpy as np
 import pandas as pd
-import config as cfg
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-from random import shuffle
+import config as cfg
+
 from torch.optim import Adam
-from torch.utils.data import DataLoader
-from torch.utils.data import TensorDataset
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 #-------------------------------------------------------------------------------
-# Define the number of additional features injected to the training data
+# Module-level constants and helpers
 #-------------------------------------------------------------------------------
 
-ADDITIONAL_FEATURES = 1 + cfg.num_derivatives
+# Each output contributes (feedback + N derivatives) extra input features.
+def _additional_features():
+    return 1 + cfg.num_derivatives
+
+def set_seed(seed):
+    """
+    Make a training run reproducible across PyTorch, NumPy and Python's RNG.
+    """
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+#-------------------------------------------------------------------------------
+# Feedback / derivative feature computation
+#-------------------------------------------------------------------------------
+
+def compute_feedback_features(y_history, num_derivatives):
+    """
+    Build the autoregressive features (feedback + cascaded finite differences)
+    from the most recent output values. This is used identically during
+    training and inference so the model sees the same feature recipe at both
+    times.
+
+    @param y_history    List/tuple of past output tensors, newest first.
+                        Length must be >= num_derivatives + 1. Each entry has
+                        shape (output_dim,).
+    @param num_derivatives Number of finite-difference derivatives to compute.
+
+    @return List of tensors [feedback, d1, d2, ...] each shape (output_dim,).
+    """
+    if len(y_history) < num_derivatives + 1:
+        raise ValueError(
+            f'y_history needs at least {num_derivatives + 1} entries, '
+            f'got {len(y_history)}'
+        )
+
+    features = [y_history[0]]
+    current_level = list(y_history)
+    for _ in range(num_derivatives):
+        current_level = [
+            current_level[i] - current_level[i + 1]
+            for i in range(len(current_level) - 1)
+        ]
+        features.append(current_level[0])
+    return features
 
 #-------------------------------------------------------------------------------
 # Neural model for predicting the next state of a dynamical system.
@@ -46,30 +94,30 @@ ADDITIONAL_FEATURES = 1 + cfg.num_derivatives
 
 class BlackboxModel(nn.Module):
     """
-    @brief Implements an model for predicting the behavior of a dynamical 
-           system.
+    @brief Predicts the next-step output of a dynamical system from exogenous
+           inputs and a recursive feedback of its own previous predictions
+           (plus their finite-difference derivatives).
     """
+
     def __init__(self):
         super(BlackboxModel, self).__init__()
 
-        # Set internal parameters
-        input_size = len(cfg.inputs)
+        input_size = len(cfg.inputs) + _additional_features() * len(cfg.outputs)
         output_size = len(cfg.outputs)
         hidden_layers = cfg.hidden_layers
         neurons_per_layer = cfg.neurons_per_layer
 
-        # Feedback the output to the input of the model
-        input_size += ADDITIONAL_FEATURES * len(cfg.outputs)
-
-        # Create RNN with a linear output
         if cfg.rnn:
-            # Add input layer
-            self.rnn = nn.RNN(input_size, neurons_per_layer, hidden_layers, nonlinearity='relu', batch_first=True).to(cfg.device).double()
+            self.rnn = nn.RNN(
+                input_size,
+                neurons_per_layer,
+                hidden_layers,
+                nonlinearity='relu',
+                batch_first=True,
+                dropout=cfg.dropout_rate if hidden_layers > 1 else 0.0,
+            )
+            self.fc = nn.Linear(neurons_per_layer, output_size)
 
-            # Add output layer
-            self.fc = nn.Linear(neurons_per_layer, output_size).to(cfg.device).double()
-
-            # Initialize input weights
             for name, param in self.rnn.named_parameters():
                 if 'weight_ih' in name:
                     nn.init.xavier_uniform_(param.data)
@@ -77,280 +125,470 @@ class BlackboxModel(nn.Module):
                     nn.init.orthogonal_(param.data)
                 elif 'bias' in name:
                     nn.init.zeros_(param.data)
-
-            # Initialize output layer weights
             nn.init.xavier_uniform_(self.fc.weight)
             nn.init.zeros_(self.fc.bias)
 
-        # Create sequential network
         else:
-            # Input layer
-            self.layers = []
-            self.layers.append(nn.Linear(input_size, neurons_per_layer))
-            self.layers.append(nn.ReLU())
+            layers = [nn.Linear(input_size, neurons_per_layer), nn.ReLU()]
+            for _ in range(hidden_layers):
+                layers.append(nn.Linear(neurons_per_layer, neurons_per_layer))
+                layers.append(nn.ReLU())
+                if cfg.dropout_rate > 0:
+                    layers.append(nn.Dropout(cfg.dropout_rate))
+            layers.append(nn.Linear(neurons_per_layer, output_size))
+            self.model = nn.Sequential(*layers)
 
-            # Hidden layers
-            for _ in range(cfg.hidden_layers):
-                self.layers.append(nn.Linear(neurons_per_layer, neurons_per_layer))
-                self.layers.append(nn.ReLU())
-
-            # Output layer
-            self.layers.append(nn.Linear(neurons_per_layer, output_size))
-            self.model = nn.Sequential(*self.layers).double().to(cfg.device)
-
-            # Initialize each layer
-            for layer in self.layers:
+            for layer in self.model:
                 if isinstance(layer, nn.Linear):
                     nn.init.xavier_uniform_(layer.weight)
                     nn.init.zeros_(layer.bias)
 
-    def forward(self, x, hidden = None):
+    def forward(self, x, hidden=None):
         """
-        @brief Forward pass for the model.
-
-        @param x Input tensor.
-        @param hidden Hidden state tensor.
-        @return output, hidden Output and updated hidden state tensors.
+        @param x      For FNN: shape (B, input_dim). For RNN: (B, T, input_dim).
+        @param hidden RNN hidden state, or None.
+        @return       FNN: (B, output_dim). RNN: ((B, T, output_dim), hidden).
         """
         if cfg.rnn:
-            output, hidden = self.rnn(x, hidden)
-            output = self.fc(output)
-            return output, hidden
-        
-        else:
-            return self.model(x)
+            out, hidden = self.rnn(x, hidden)
+            return self.fc(out), hidden
+        return self.model(x)
 
-def save_model(model, name):
+#-------------------------------------------------------------------------------
+# Loss function — finite differences along the TIME axis of a sequence
+#-------------------------------------------------------------------------------
+
+def derivative_aware_loss(y_pred, y_true, num_derivatives):
     """
-    @brief Saves the model weights to disk.
+    MSE between predictions and ground truth, plus MSE on successive
+    time-derivatives. Both tensors are shape (T, output_dim) where dim 0 is
+    time. This penalises both pointwise error and shape mismatches.
+    """
+    loss = F.mse_loss(y_pred, y_true)
+    dp, dt = y_pred, y_true
+    for _ in range(num_derivatives):
+        if dp.shape[0] < 2:
+            break
+        dp = dp[1:] - dp[:-1]
+        dt = dt[1:] - dt[:-1]
+        loss = loss + F.mse_loss(dp, dt)
+    return loss
 
-    @param model Trained model object.
-    @param name Filename to save as.
+#-------------------------------------------------------------------------------
+# Sequence loading and train/val/test split
+#-------------------------------------------------------------------------------
+
+class Sequence:
+    """
+    One experimental run, materialised as device-resident tensors.
+
+    X_exo: (T, len(cfg.inputs))  -- exogenous inputs only (no feedback)
+    y:     (T, len(cfg.outputs))
+    """
+    __slots__ = ('name', 'X_exo', 'y')
+
+    def __init__(self, name, X_exo, y):
+        self.name = name
+        self.X_exo = X_exo
+        self.y = y
+
+    def __len__(self):
+        return self.X_exo.shape[0]
+
+
+def _load_sequences():
+    """
+    Load every CSV in cfg.training_data_path as an independent Sequence.
+    Feedback features are NOT materialised here -- they are rebuilt on the fly
+    during training so we can mix teacher-forced and free-running steps.
+    """
+    files = sorted(
+        f for f in os.listdir(cfg.training_data_path) if f.endswith('.csv')
+    )
+    if not files:
+        raise RuntimeError(
+            f'No CSVs found in {cfg.training_data_path}; '
+            f'run "Process experimental data" first.'
+        )
+
+    sequences = []
+    for fname in files:
+        path = os.path.join(cfg.training_data_path, fname)
+        df = pd.read_csv(path)
+
+        missing_in = [c for c in cfg.inputs if c not in df.columns]
+        missing_out = [c for c in cfg.outputs if c not in df.columns]
+        if missing_in or missing_out:
+            print(
+                f'-> Skipping {fname}: missing columns '
+                f'in={missing_in} out={missing_out}'
+            )
+            continue
+
+        X_exo = torch.tensor(
+            df[cfg.inputs].values, dtype=torch.float32, device=cfg.device
+        )
+        y = torch.tensor(
+            df[cfg.outputs].values, dtype=torch.float32, device=cfg.device
+        )
+        sequences.append(Sequence(fname, X_exo, y))
+
+    return sequences
+
+
+def _split_sequences(sequences):
+    """
+    Split by *file*, not by row, so each experimental run lives in exactly one
+    of train / val / test. With small datasets we still guarantee at least one
+    sequence per non-zero-ratio split when possible.
+    """
+    n = len(sequences)
+    if n < 3:
+        raise RuntimeError(
+            f'Need at least 3 experiment CSVs for train/val/test split, '
+            f'found {n}. Lower val_ratio/test_ratio or gather more data.'
+        )
+
+    # Deterministic shuffle order
+    rng = random.Random(cfg.seed)
+    order = list(range(n))
+    rng.shuffle(order)
+
+    n_val = max(1, int(round(n * cfg.val_ratio)))
+    n_test = max(1, int(round(n * cfg.test_ratio)))
+    if n_val + n_test >= n:
+        # Pathological config; fall back to a minimal split
+        n_val, n_test = 1, 1
+
+    test_idx = set(order[:n_test])
+    val_idx = set(order[n_test:n_test + n_val])
+
+    train, val, test = [], [], []
+    for i, seq in enumerate(sequences):
+        if i in test_idx:
+            test.append(seq)
+        elif i in val_idx:
+            val.append(seq)
+        else:
+            train.append(seq)
+
+    return train, val, test
+
+
+def _write_split_manifest(train, val, test):
+    """
+    Record which CSVs went to which split, and copy the held-out files so the
+    user can run predictions on data the model never saw during training.
     """
     os.makedirs(cfg.model_save_path, exist_ok=True)
-    model_path = os.path.join(cfg.model_save_path, name)
-    torch.save(model.state_dict(), model_path)
+    manifest_path = os.path.join(cfg.model_save_path, 'split_manifest.json')
+    with open(manifest_path, 'w') as f:
+        json.dump(
+            {
+                'seed': cfg.seed,
+                'train': [s.name for s in train],
+                'val':   [s.name for s in val],
+                'test':  [s.name for s in test],
+            },
+            f, indent=2,
+        )
+
+    os.makedirs(cfg.held_out_path, exist_ok=True)
+    for seq in val + test:
+        src = os.path.join(cfg.training_data_path, seq.name)
+        dst = os.path.join(cfg.held_out_path, seq.name)
+        if os.path.exists(src):
+            shutil.copyfile(src, dst)
+
+    print(f'-> Split manifest: {manifest_path}')
+    print(f'-> Train: {len(train)}, Val: {len(val)}, Test: {len(test)}')
 
 #-------------------------------------------------------------------------------
-# Implement a custom loss function
+# Sequence rollout with scheduled sampling
 #-------------------------------------------------------------------------------
 
-class DerivativeAwareLoss(nn.Module):
-    def __init__(self):
-        super(DerivativeAwareLoss, self).__init__()
-
-    def forward(self, y_pred, y_true):
-        # Calculate the original loss (e.g., MSE)
-        loss = torch.mean((y_pred - y_true)**2)
-
-        # Initialize dy_pred and dy_true as the original outputs
-        dy_pred = y_pred
-        dy_true = y_true
-
-        # Loop through each level of derivatives
-        for i in range(cfg.num_derivatives):
-             # Check if the tensor size is sufficient for another derivative calculation
-            if dy_pred.size(1) < 2 or dy_true.size(1) < 2:
-                break
-
-            # Compute the derivative by taking the difference between adjacent elements
-            # This effectively computes the i-th derivative of the original function
-            dy_pred = dy_pred[:, 1:] - dy_pred[:, :-1]
-            dy_true = dy_true[:, 1:] - dy_true[:, :-1]
-            
-            # Calculate the derivative loss for this level
-            loss += torch.mean((dy_pred - dy_true)**2)
-
-        # Return obtained loss
-        return loss
-
-#-------------------------------------------------------------------------------
-# Training data pre-processing functions
-#-------------------------------------------------------------------------------
-
-def load_data(batch_size):
+def _teacher_forcing_prob(epoch):
     """
-    @brief Load training data from CSV files and prepare DataLoader.
-
-    @return train_loader PyTorch DataLoader object containing the training data.
+    Linearly decay the teacher-forcing probability from start_prob down to
+    end_prob over decay_epochs, then hold at end_prob.
     """
-    # Get all test cases
-    dfs = []
-    csv_files = [f for f in os.listdir(cfg.training_data_path) if f.endswith('.csv')]
-    for csv_file in csv_files:
-        if csv_file.endswith('.csv'):
-            df = pd.read_csv(os.path.join(cfg.training_data_path, csv_file))
-            dfs.append(df)
+    ss = cfg.scheduled_sampling
+    start = float(ss['start_prob'])
+    end = float(ss['end_prob'])
+    decay = max(1, int(ss['decay_epochs']))
+    if epoch >= decay:
+        return end
+    return start + (end - start) * (epoch / decay)
 
-    # Concatenate all the dataframes to create a single dataframe
-    train_df = pd.concat(dfs, ignore_index=True)
 
-    # Generate feedback data & derivatives
-    input_columns = copy.deepcopy(cfg.inputs)
-    for output in cfg.outputs:
-        # Register feedback signal
-        feedback_name = output + '_feedback'
-        input_columns.append(feedback_name)
-        train_df[feedback_name] = train_df[output].shift(1).fillna(0) 
-    
-        # Register derivatives
-        for i in range(1, cfg.num_derivatives + 1):
-            derivative_name = output + f'_derivative_{i}'
-            input_columns.append(derivative_name)
-            if i == 1:
-                train_df[derivative_name] = train_df[feedback_name].diff().fillna(0)
+def _rollout_sequence(model, seq, teacher_forcing_prob, train_mode):
+    """
+    Step through a sequence one timestep at a time, mixing teacher-forced and
+    free-running feedback per step according to teacher_forcing_prob.
+
+    During training (train_mode=True) we build an autograd graph through every
+    step so gradients flow into the model from both the pointwise loss and the
+    autoregressive feedback path. Predictions used as feedback are detached so
+    BPTT does not explode through long sequences.
+
+    @return Tensor of shape (T, output_dim) with the model's predictions.
+    """
+    T = len(seq)
+    out_dim = seq.y.shape[1]
+    num_derivs = cfg.num_derivatives
+    buffer_len = num_derivs + 1
+
+    # y_history[0] is the most-recent feedback. We seed with zeros, which
+    # matches the .fillna(0) padding used by the original implementation.
+    y_history = [
+        torch.zeros(out_dim, dtype=torch.float32, device=cfg.device)
+        for _ in range(buffer_len)
+    ]
+
+    hidden = None
+    preds = []
+
+    for t in range(T):
+        feedback_features = compute_feedback_features(y_history, num_derivs)
+        # Concatenate exogenous inputs with the feedback features
+        x_t = torch.cat([seq.X_exo[t]] + feedback_features, dim=0)
+
+        if cfg.rnn:
+            # (B=1, T=1, input_dim)
+            x_in = x_t.unsqueeze(0).unsqueeze(0)
+            y_step, hidden = model(x_in, hidden)
+            y_step = y_step.squeeze(0).squeeze(0)
+        else:
+            # (B=1, input_dim)
+            x_in = x_t.unsqueeze(0)
+            y_step = model(x_in).squeeze(0)
+
+        preds.append(y_step)
+
+        # Decide what to feed back at t+1: ground truth (teacher) or
+        # the model's own prediction (student). Detach the prediction so the
+        # autograd graph does not grow unbounded over T steps.
+        if t + 1 < T:
+            use_teacher = (
+                train_mode and random.random() < teacher_forcing_prob
+            )
+            if use_teacher:
+                next_feedback = seq.y[t]
+                # Perturb the teacher signal so the model learns to tolerate
+                # imperfect feedback. Without this it overfits to a clean
+                # autoregressive input and explodes once it has to consume
+                # its own (slightly wrong) predictions at eval time.
+                noise_std = cfg.feedback_noise_std
+                if noise_std > 0.0:
+                    next_feedback = next_feedback + torch.randn_like(
+                        next_feedback
+                    ) * noise_std
             else:
-                previous_derivative = output + f'_derivative_{i - 1}'
-                train_df[derivative_name] = train_df[previous_derivative].diff().fillna(0)
+                next_feedback = y_step.detach() if train_mode else y_step
 
-    # Separate features
-    X_train = torch.tensor(
-        train_df[input_columns].values,
-        dtype=torch.double).to(cfg.device)
+            y_history = [next_feedback] + y_history[:-1]
 
-    # Create output DataLoader dictionary
-    y_train = torch.tensor(
-        train_df[cfg.outputs].values, 
-        dtype=torch.double).to(cfg.device)
-
-    # Get loader
-    train_loader = DataLoader(
-        TensorDataset(X_train, y_train), 
-        batch_size=batch_size, 
-        shuffle=False)
-    
-    # Return training loader
-    return train_loader
+    return torch.stack(preds, dim=0)
 
 #-------------------------------------------------------------------------------
-# Model training code
+# Train / evaluate
 #-------------------------------------------------------------------------------
+
+def _evaluate(model, sequences):
+    """
+    Closed-loop validation: zero teacher forcing, no gradients.
+    Returns the mean per-step MSE across all evaluation sequences.
+    """
+    model.eval()
+    total_sq_err = 0.0
+    total_steps = 0
+    with torch.no_grad():
+        for seq in sequences:
+            preds = _rollout_sequence(model, seq, 0.0, train_mode=False)
+            total_sq_err += F.mse_loss(
+                preds, seq.y, reduction='sum'
+            ).item()
+            total_steps += seq.y.numel()
+    return total_sq_err / max(1, total_steps)
+
+
+def _save_state(model, name):
+    os.makedirs(cfg.model_save_path, exist_ok=True)
+    torch.save(
+        model.state_dict(),
+        os.path.join(cfg.model_save_path, name),
+    )
+
 
 def train_model(model):
     """
-    @brief Train the RNN model on the prepared data.
+    Train the supplied BlackboxModel with scheduled-sampling closed-loop
+    rollouts. Best model is selected on validation loss; LR is decayed on
+    validation-loss plateaus.
+    """
+    set_seed(cfg.seed)
 
-    @param model Initialized BlackboxModel object.
-    """    
-    # Initialize loss function
-    loss_function = DerivativeAwareLoss()
-    
-    # Initialize model optimizer
-    optimizer = Adam(model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
-    
-    # Initialize the StepLR scheduler
-    scheduler = StepLR(optimizer, step_size=2, gamma=0.1)
-    
-    # Table header
-    print(f'{"Epoch":>5} | {"Progress (%)":>12} | {"Average Loss":>12} | {"Current Loss":>12}')
-    print('-' * 50)
+    sequences = _load_sequences()
+    train_seqs, val_seqs, test_seqs = _split_sequences(sequences)
+    _write_split_manifest(train_seqs, val_seqs, test_seqs)
 
-    # Initialize early stopping variables
-    counter = 0
+    if not train_seqs:
+        raise RuntimeError('No training sequences after split.')
+
+    optimizer = Adam(
+        model.parameters(),
+        lr=cfg.learning_rate,
+        weight_decay=cfg.weight_decay,
+    )
+    scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode='min',
+        factor=cfg.lr_scheduler['factor'],
+        patience=cfg.lr_scheduler['patience'],
+        min_lr=cfg.lr_scheduler['min_lr'],
+    )
+
+    batch_size = max(1, int(cfg.batch_size))
+    grad_clip = float(cfg.grad_clip)
+    # EMA factor for smoothing val loss: smoothed = alpha*smoothed + (1-alpha)*raw
+    # Higher alpha = heavier smoothing. 0.0 falls back to raw val loss.
+    val_alpha = max(0.0, min(0.99, float(cfg.val_smoothing)))
+    smoothed_val = None
+    best_val_loss = float('inf')
     best_epoch = 0
-    best_loss = float('inf')
-    
-    # Create a dictionary to store losses across epochs
-    model_losses = {}
-    
-    # Loop through epochs and batches to train the model
-    batch_size = cfg.batch_size
-    for epoch in range(cfg.max_epochs):
-        # Load training data & shuffle the batches
-        batches = list(load_data(batch_size))
-        shuffle(batches)
+    epochs_since_improvement = 0
+    history = {}
 
-        # Initialize epoch parameters
-        total_loss = 0
-        hidden_state = None
-    
-        # Traverse the training data in batches
-        for i, (X_train, y_train) in enumerate(batches):
-            # Forward pass
-            if cfg.rnn:
-                y_pred, state = model(X_train, hidden_state)
-            else:
-                y_pred = model(X_train)
+    header_smoothed = f' | {"Val (EMA)":>12}' if val_alpha > 0 else ''
+    print(
+        f'{"Epoch":>5} | {"TF prob":>7} | '
+        f'{"Train Loss":>12} | {"Val Loss":>12}{header_smoothed} | {"LR":>10}'
+    )
+    print('-' * (64 + (len(header_smoothed))))
 
-            # Loss calculation
-            loss = loss_function(y_pred, y_train)
+    for epoch in range(1, cfg.max_epochs + 1):
+        model.train()
+        tf_prob = _teacher_forcing_prob(epoch - 1)
 
-            # Gradient clipping and backpropagation
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
-            optimizer.step()
+        # Shuffle training-sequence order each epoch
+        order = list(range(len(train_seqs)))
+        random.shuffle(order)
 
-            # Update hidden state
-            if cfg.rnn:
-                hidden_state = state.detach()
+        running_loss = 0.0
+        running_count = 0
+        optimizer.zero_grad()
+        accumulated = 0
 
-            # Logging
-            total_loss += loss.item()
-            average_loss = total_loss / (i + 1)
-            epoch_progress = i / len(batches) * 100
-            print(f'{epoch+1:5d} | {epoch_progress:12.2f} | {average_loss:12e} | {loss.item():12e}', end='\r')
+        for step, seq_idx in enumerate(order, start=1):
+            seq = train_seqs[seq_idx]
+            preds = _rollout_sequence(model, seq, tf_prob, train_mode=True)
+            loss = derivative_aware_loss(preds, seq.y, cfg.num_derivatives)
 
-        # Save model
-        print()
-        save_model(model, f'{cfg.model_name}_Epoch_{epoch+1}.pt')
+            # Gradient accumulation: average over the mini-batch of sequences
+            (loss / batch_size).backward()
+            accumulated += 1
+            running_loss += loss.item()
+            running_count += 1
 
-        # Register epoch's loss
-        model_losses[epoch+1] = total_loss / len(batches)
+            if accumulated >= batch_size or step == len(order):
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                optimizer.step()
+                optimizer.zero_grad()
+                accumulated = 0
 
-        # Update learning rate scheduler
-        scheduler.step()
+        train_loss = running_loss / max(1, running_count)
+        val_loss = _evaluate(model, val_seqs)
 
-        # Early stopping check
-        if best_loss - average_loss > 0 and best_loss - average_loss < cfg.early_stop_threshold:
-            counter += 1
-            #batch_size = int(max(2, batch_size * 0.5))
+        # EMA-smooth the val loss before using it to make decisions. The raw
+        # closed-loop val signal is intrinsically noisy on small datasets, and
+        # reacting to it directly causes premature LR cuts and unlucky
+        # best-checkpoint selection.
+        if val_alpha > 0:
+            smoothed_val = (
+                val_loss if smoothed_val is None
+                else val_alpha * smoothed_val + (1 - val_alpha) * val_loss
+            )
+            decision_loss = smoothed_val
         else:
-            counter = 0
-            best_epoch = epoch + 1
-            best_loss = average_loss
-            #batch_size = cfg.batch_size
+            decision_loss = val_loss
 
-        # Early stopping patience ran out
-        if counter >= cfg.early_stop_patience:
-            print('')
-            print(f"-> Early stopping at epoch {epoch+1} with average loss {average_loss}")
-            break
+        scheduler.step(decision_loss)
+        current_lr = optimizer.param_groups[0]['lr']
 
-    # Find the epoch with the least loss
-    print('')
-    print(f'-> Best epoch is {best_epoch} with an average loss of {model_losses[best_epoch]}')
+        history[epoch] = {
+            'train': train_loss,
+            'val': val_loss,
+            'val_smoothed': smoothed_val,
+        }
+        if val_alpha > 0:
+            print(
+                f'{epoch:5d} | {tf_prob:7.3f} | '
+                f'{train_loss:12.6e} | {val_loss:12.6e} | '
+                f'{smoothed_val:12.6e} | {current_lr:10.2e}'
+            )
+        else:
+            print(
+                f'{epoch:5d} | {tf_prob:7.3f} | '
+                f'{train_loss:12.6e} | {val_loss:12.6e} | {current_lr:10.2e}'
+            )
 
-    # Copy the best model file to {cfg.model_name}.pt
-    src_file = os.path.join(cfg.model_save_path, f'{cfg.model_name}_Epoch_{best_epoch}.pt')
-    dst_file = os.path.join(cfg.model_save_path, f'{cfg.model_name}.pt')
-    shutil.copy(src_file, dst_file)
-    print(f'-> Copied best model {src_file} to {dst_file}')
+        # Early-stopping & best-model bookkeeping. Use the smoothed signal so
+        # we don't latch onto a noisy outlier epoch as the "best" model.
+        if best_val_loss - decision_loss > cfg.early_stop_threshold:
+            best_val_loss = decision_loss
+            best_epoch = epoch
+            epochs_since_improvement = 0
+            _save_state(model, f'{cfg.model_name}.pt')
+        else:
+            epochs_since_improvement += 1
+            if epochs_since_improvement >= cfg.early_stop_patience:
+                print(
+                    f'\n-> Early stopping at epoch {epoch}; '
+                    f'best val loss {best_val_loss:.6e} at epoch {best_epoch}.'
+                )
+                break
+
+    print(f'\n-> Best epoch: {best_epoch}, val loss: {best_val_loss:.6e}')
+
+    # Final held-out evaluation with the best checkpoint
+    best_path = os.path.join(cfg.model_save_path, f'{cfg.model_name}.pt')
+    if os.path.exists(best_path):
+        model.load_state_dict(torch.load(best_path, weights_only=True))
+
+    if test_seqs:
+        test_loss = _evaluate(model, test_seqs)
+        print(f'-> Held-out test loss: {test_loss:.6e}')
+
+    history_path = os.path.join(cfg.model_save_path, 'training_history.json')
+    with open(history_path, 'w') as f:
+        json.dump(
+            {
+                'best_epoch': best_epoch,
+                'best_val_loss': best_val_loss,
+                'history': history,
+            },
+            f, indent=2,
+        )
 
 #-------------------------------------------------------------------------------
-# Simplified interface functions for the rest of the application
+# Public API used by main.py
 #-------------------------------------------------------------------------------
 
 def generate_models():
     """
-    @brief Train new RNN models from scratch.
-
-    This function initializes new BlackboxModel objects and triggers their training.
-    The models are moved to the specified device and converted to double precision
-    before training begins.
+    @brief Train a fresh BlackboxModel from scratch.
     """
-    train_model(BlackboxModel().to(cfg.device).double())
+    set_seed(cfg.seed)
+    model = BlackboxModel().to(cfg.device)
+    train_model(model)
+
 
 def retrain_models():
     """
-    @brief Retrain existing RNN models.
-
-    This function loads pre-trained RNNModels from disk and retrains them.
-    The models are moved to the specified device and converted to double precision
-    before retraining.
+    @brief Continue training the existing best checkpoint on disk.
     """
+    set_seed(cfg.seed)
+    model = BlackboxModel().to(cfg.device)
     model_path = os.path.join(cfg.model_save_path, f'{cfg.model_name}.pt')
-    model = BlackboxModel().to(cfg.device).double()
-    model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path, weights_only=True))
     train_model(model)
-

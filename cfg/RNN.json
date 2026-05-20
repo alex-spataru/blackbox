@@ -1,22 +1,26 @@
 {
    "name": "RM42 Magnetic Brake (RNN)",
    "rnn": true,
+   "seed": 42,
    "device": "cpu",
-   "max_epochs": 99,
-   "batch_size": 25,
-   "weight_decay": 0,
-   "hidden_layers": 3,
-   "dropout_rate": 0.3,
+   "max_epochs": 200,
+   "batch_size": 8,
+   "weight_decay": 1e-4,
+   "hidden_layers": 2,
+   "dropout_rate": 0.15,
    "num_derivatives": 1,
    "learning_rate": 0.001,
-   "neurons_per_layer": 256,
-   "early_stop_patience": 5,
-   "early_stop_threshold": 1e-6,
+   "neurons_per_layer": 192,
+   "early_stop_patience": 25,
+   "early_stop_threshold": 1e-5,
+   "val_ratio": 0.15,
+   "test_ratio": 0.15,
    "csv_encoding": "ISO-8859-1",
    "plot_save_path": "./outputs/RNN_Model/Plots",
    "model_save_path": "./outputs/RNN_Model/Models",
    "test_cases_path": "./outputs/RNN_Model/Test Cases",
    "training_data_path": "./outputs/RNN_Model/Training Data",
+   "held_out_path": "./outputs/RNN_Model/Held Out",
    "test_vectors_path": "./cfg/RM42 Magnetic Brake/Test Vectors",
    "raw_data_path": "./cfg/RM42 Magnetic Brake/Experimental Data",
    "operation_modes": {
@@ -71,6 +75,18 @@
    "constant_signals": [
       "Distance",
       "Temperature"
-   ]
+   ],
+   "scheduled_sampling": {
+      "start_prob": 0.9,
+      "end_prob": 0.0,
+      "decay_epochs": 40
+   },
+   "lr_scheduler": {
+      "factor": 0.5,
+      "patience": 8,
+      "min_lr": 1e-6
+   },
+   "val_smoothing": 0.7,
+   "grad_clip": 1.0,
+   "feedback_noise_std": 0.01
 }
-
