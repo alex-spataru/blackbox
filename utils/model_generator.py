@@ -36,13 +36,15 @@ import config as cfg
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 # Module-level constants and helpers
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
 
 # Each output contributes (feedback + N derivatives) extra input features.
 def _additional_features():
     return 1 + cfg.num_derivatives
+
 
 def set_seed(seed):
     """
@@ -54,9 +56,11 @@ def set_seed(seed):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-#-------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------
 # Feedback / derivative feature computation
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
 
 def compute_feedback_features(y_history, num_derivatives):
     """
@@ -74,8 +78,8 @@ def compute_feedback_features(y_history, num_derivatives):
     """
     if len(y_history) < num_derivatives + 1:
         raise ValueError(
-            f'y_history needs at least {num_derivatives + 1} entries, '
-            f'got {len(y_history)}'
+            f"y_history needs at least {num_derivatives + 1} entries, "
+            f"got {len(y_history)}"
         )
 
     features = [y_history[0]]
@@ -88,9 +92,11 @@ def compute_feedback_features(y_history, num_derivatives):
         features.append(current_level[0])
     return features
 
-#-------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------
 # Neural model for predicting the next state of a dynamical system.
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
 
 class BlackboxModel(nn.Module):
     """
@@ -112,18 +118,18 @@ class BlackboxModel(nn.Module):
                 input_size,
                 neurons_per_layer,
                 hidden_layers,
-                nonlinearity='relu',
+                nonlinearity="relu",
                 batch_first=True,
                 dropout=cfg.dropout_rate if hidden_layers > 1 else 0.0,
             )
             self.fc = nn.Linear(neurons_per_layer, output_size)
 
             for name, param in self.rnn.named_parameters():
-                if 'weight_ih' in name:
+                if "weight_ih" in name:
                     nn.init.xavier_uniform_(param.data)
-                elif 'weight_hh' in name:
+                elif "weight_hh" in name:
                     nn.init.orthogonal_(param.data)
-                elif 'bias' in name:
+                elif "bias" in name:
                     nn.init.zeros_(param.data)
             nn.init.xavier_uniform_(self.fc.weight)
             nn.init.zeros_(self.fc.bias)
@@ -154,9 +160,11 @@ class BlackboxModel(nn.Module):
             return self.fc(out), hidden
         return self.model(x)
 
-#-------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------
 # Loss function — finite differences along the TIME axis of a sequence
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
 
 def derivative_aware_loss(y_pred, y_true, num_derivatives):
     """
@@ -174,9 +182,11 @@ def derivative_aware_loss(y_pred, y_true, num_derivatives):
         loss = loss + F.mse_loss(dp, dt)
     return loss
 
-#-------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------
 # Sequence loading and train/val/test split
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
 
 class Sequence:
     """
@@ -185,7 +195,8 @@ class Sequence:
     X_exo: (T, len(cfg.inputs))  -- exogenous inputs only (no feedback)
     y:     (T, len(cfg.outputs))
     """
-    __slots__ = ('name', 'X_exo', 'y')
+
+    __slots__ = ("name", "X_exo", "y")
 
     def __init__(self, name, X_exo, y):
         self.name = name
@@ -202,12 +213,10 @@ def _load_sequences():
     Feedback features are NOT materialised here -- they are rebuilt on the fly
     during training so we can mix teacher-forced and free-running steps.
     """
-    files = sorted(
-        f for f in os.listdir(cfg.training_data_path) if f.endswith('.csv')
-    )
+    files = sorted(f for f in os.listdir(cfg.training_data_path) if f.endswith(".csv"))
     if not files:
         raise RuntimeError(
-            f'No CSVs found in {cfg.training_data_path}; '
+            f"No CSVs found in {cfg.training_data_path}; "
             f'run "Process experimental data" first.'
         )
 
@@ -220,17 +229,15 @@ def _load_sequences():
         missing_out = [c for c in cfg.outputs if c not in df.columns]
         if missing_in or missing_out:
             print(
-                f'-> Skipping {fname}: missing columns '
-                f'in={missing_in} out={missing_out}'
+                f"-> Skipping {fname}: missing columns "
+                f"in={missing_in} out={missing_out}"
             )
             continue
 
         X_exo = torch.tensor(
             df[cfg.inputs].values, dtype=torch.float32, device=cfg.device
         )
-        y = torch.tensor(
-            df[cfg.outputs].values, dtype=torch.float32, device=cfg.device
-        )
+        y = torch.tensor(df[cfg.outputs].values, dtype=torch.float32, device=cfg.device)
         sequences.append(Sequence(fname, X_exo, y))
 
     return sequences
@@ -245,8 +252,8 @@ def _split_sequences(sequences):
     n = len(sequences)
     if n < 3:
         raise RuntimeError(
-            f'Need at least 3 experiment CSVs for train/val/test split, '
-            f'found {n}. Lower val_ratio/test_ratio or gather more data.'
+            f"Need at least 3 experiment CSVs for train/val/test split, "
+            f"found {n}. Lower val_ratio/test_ratio or gather more data."
         )
 
     # Deterministic shuffle order
@@ -261,7 +268,7 @@ def _split_sequences(sequences):
         n_val, n_test = 1, 1
 
     test_idx = set(order[:n_test])
-    val_idx = set(order[n_test:n_test + n_val])
+    val_idx = set(order[n_test : n_test + n_val])
 
     train, val, test = [], [], []
     for i, seq in enumerate(sequences):
@@ -281,16 +288,17 @@ def _write_split_manifest(train, val, test):
     user can run predictions on data the model never saw during training.
     """
     os.makedirs(cfg.model_save_path, exist_ok=True)
-    manifest_path = os.path.join(cfg.model_save_path, 'split_manifest.json')
-    with open(manifest_path, 'w') as f:
+    manifest_path = os.path.join(cfg.model_save_path, "split_manifest.json")
+    with open(manifest_path, "w") as f:
         json.dump(
             {
-                'seed': cfg.seed,
-                'train': [s.name for s in train],
-                'val':   [s.name for s in val],
-                'test':  [s.name for s in test],
+                "seed": cfg.seed,
+                "train": [s.name for s in train],
+                "val": [s.name for s in val],
+                "test": [s.name for s in test],
             },
-            f, indent=2,
+            f,
+            indent=2,
         )
 
     os.makedirs(cfg.held_out_path, exist_ok=True)
@@ -300,12 +308,14 @@ def _write_split_manifest(train, val, test):
         if os.path.exists(src):
             shutil.copyfile(src, dst)
 
-    print(f'-> Split manifest: {manifest_path}')
-    print(f'-> Train: {len(train)}, Val: {len(val)}, Test: {len(test)}')
+    print(f"-> Split manifest: {manifest_path}")
+    print(f"-> Train: {len(train)}, Val: {len(val)}, Test: {len(test)}")
 
-#-------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------
 # Sequence rollout with scheduled sampling
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
 
 def _teacher_forcing_prob(epoch):
     """
@@ -313,9 +323,9 @@ def _teacher_forcing_prob(epoch):
     end_prob over decay_epochs, then hold at end_prob.
     """
     ss = cfg.scheduled_sampling
-    start = float(ss['start_prob'])
-    end = float(ss['end_prob'])
-    decay = max(1, int(ss['decay_epochs']))
+    start = float(ss["start_prob"])
+    end = float(ss["end_prob"])
+    decay = max(1, int(ss["decay_epochs"]))
     if epoch >= decay:
         return end
     return start + (end - start) * (epoch / decay)
@@ -369,9 +379,7 @@ def _rollout_sequence(model, seq, teacher_forcing_prob, train_mode):
         # the model's own prediction (student). Detach the prediction so the
         # autograd graph does not grow unbounded over T steps.
         if t + 1 < T:
-            use_teacher = (
-                train_mode and random.random() < teacher_forcing_prob
-            )
+            use_teacher = train_mode and random.random() < teacher_forcing_prob
             if use_teacher:
                 next_feedback = seq.y[t]
                 # Perturb the teacher signal so the model learns to tolerate
@@ -380,9 +388,9 @@ def _rollout_sequence(model, seq, teacher_forcing_prob, train_mode):
                 # its own (slightly wrong) predictions at eval time.
                 noise_std = cfg.feedback_noise_std
                 if noise_std > 0.0:
-                    next_feedback = next_feedback + torch.randn_like(
-                        next_feedback
-                    ) * noise_std
+                    next_feedback = (
+                        next_feedback + torch.randn_like(next_feedback) * noise_std
+                    )
             else:
                 next_feedback = y_step.detach() if train_mode else y_step
 
@@ -390,9 +398,11 @@ def _rollout_sequence(model, seq, teacher_forcing_prob, train_mode):
 
     return torch.stack(preds, dim=0)
 
-#-------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------
 # Train / evaluate
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
 
 def _evaluate(model, sequences):
     """
@@ -405,9 +415,7 @@ def _evaluate(model, sequences):
     with torch.no_grad():
         for seq in sequences:
             preds = _rollout_sequence(model, seq, 0.0, train_mode=False)
-            total_sq_err += F.mse_loss(
-                preds, seq.y, reduction='sum'
-            ).item()
+            total_sq_err += F.mse_loss(preds, seq.y, reduction="sum").item()
             total_steps += seq.y.numel()
     return total_sq_err / max(1, total_steps)
 
@@ -433,7 +441,7 @@ def train_model(model):
     _write_split_manifest(train_seqs, val_seqs, test_seqs)
 
     if not train_seqs:
-        raise RuntimeError('No training sequences after split.')
+        raise RuntimeError("No training sequences after split.")
 
     optimizer = Adam(
         model.parameters(),
@@ -442,10 +450,10 @@ def train_model(model):
     )
     scheduler = ReduceLROnPlateau(
         optimizer,
-        mode='min',
-        factor=cfg.lr_scheduler['factor'],
-        patience=cfg.lr_scheduler['patience'],
-        min_lr=cfg.lr_scheduler['min_lr'],
+        mode="min",
+        factor=cfg.lr_scheduler["factor"],
+        patience=cfg.lr_scheduler["patience"],
+        min_lr=cfg.lr_scheduler["min_lr"],
     )
 
     batch_size = max(1, int(cfg.batch_size))
@@ -454,17 +462,17 @@ def train_model(model):
     # Higher alpha = heavier smoothing. 0.0 falls back to raw val loss.
     val_alpha = max(0.0, min(0.99, float(cfg.val_smoothing)))
     smoothed_val = None
-    best_val_loss = float('inf')
+    best_val_loss = float("inf")
     best_epoch = 0
     epochs_since_improvement = 0
     history = {}
 
-    header_smoothed = f' | {"Val (EMA)":>12}' if val_alpha > 0 else ''
+    header_smoothed = f' | {"Val (EMA)":>12}' if val_alpha > 0 else ""
     print(
         f'{"Epoch":>5} | {"TF prob":>7} | '
         f'{"Train Loss":>12} | {"Val Loss":>12}{header_smoothed} | {"LR":>10}'
     )
-    print('-' * (64 + (len(header_smoothed))))
+    print("-" * (64 + (len(header_smoothed))))
 
     for epoch in range(1, cfg.max_epochs + 1):
         model.train()
@@ -505,7 +513,8 @@ def train_model(model):
         # best-checkpoint selection.
         if val_alpha > 0:
             smoothed_val = (
-                val_loss if smoothed_val is None
+                val_loss
+                if smoothed_val is None
                 else val_alpha * smoothed_val + (1 - val_alpha) * val_loss
             )
             decision_loss = smoothed_val
@@ -513,23 +522,23 @@ def train_model(model):
             decision_loss = val_loss
 
         scheduler.step(decision_loss)
-        current_lr = optimizer.param_groups[0]['lr']
+        current_lr = optimizer.param_groups[0]["lr"]
 
         history[epoch] = {
-            'train': train_loss,
-            'val': val_loss,
-            'val_smoothed': smoothed_val,
+            "train": train_loss,
+            "val": val_loss,
+            "val_smoothed": smoothed_val,
         }
         if val_alpha > 0:
             print(
-                f'{epoch:5d} | {tf_prob:7.3f} | '
-                f'{train_loss:12.6e} | {val_loss:12.6e} | '
-                f'{smoothed_val:12.6e} | {current_lr:10.2e}'
+                f"{epoch:5d} | {tf_prob:7.3f} | "
+                f"{train_loss:12.6e} | {val_loss:12.6e} | "
+                f"{smoothed_val:12.6e} | {current_lr:10.2e}"
             )
         else:
             print(
-                f'{epoch:5d} | {tf_prob:7.3f} | '
-                f'{train_loss:12.6e} | {val_loss:12.6e} | {current_lr:10.2e}'
+                f"{epoch:5d} | {tf_prob:7.3f} | "
+                f"{train_loss:12.6e} | {val_loss:12.6e} | {current_lr:10.2e}"
             )
 
         # Early-stopping & best-model bookkeeping. Use the smoothed signal so
@@ -538,41 +547,44 @@ def train_model(model):
             best_val_loss = decision_loss
             best_epoch = epoch
             epochs_since_improvement = 0
-            _save_state(model, f'{cfg.model_name}.pt')
+            _save_state(model, f"{cfg.model_name}.pt")
         else:
             epochs_since_improvement += 1
             if epochs_since_improvement >= cfg.early_stop_patience:
                 print(
-                    f'\n-> Early stopping at epoch {epoch}; '
-                    f'best val loss {best_val_loss:.6e} at epoch {best_epoch}.'
+                    f"\n-> Early stopping at epoch {epoch}; "
+                    f"best val loss {best_val_loss:.6e} at epoch {best_epoch}."
                 )
                 break
 
-    print(f'\n-> Best epoch: {best_epoch}, val loss: {best_val_loss:.6e}')
+    print(f"\n-> Best epoch: {best_epoch}, val loss: {best_val_loss:.6e}")
 
     # Final held-out evaluation with the best checkpoint
-    best_path = os.path.join(cfg.model_save_path, f'{cfg.model_name}.pt')
+    best_path = os.path.join(cfg.model_save_path, f"{cfg.model_name}.pt")
     if os.path.exists(best_path):
         model.load_state_dict(torch.load(best_path, weights_only=True))
 
     if test_seqs:
         test_loss = _evaluate(model, test_seqs)
-        print(f'-> Held-out test loss: {test_loss:.6e}')
+        print(f"-> Held-out test loss: {test_loss:.6e}")
 
-    history_path = os.path.join(cfg.model_save_path, 'training_history.json')
-    with open(history_path, 'w') as f:
+    history_path = os.path.join(cfg.model_save_path, "training_history.json")
+    with open(history_path, "w") as f:
         json.dump(
             {
-                'best_epoch': best_epoch,
-                'best_val_loss': best_val_loss,
-                'history': history,
+                "best_epoch": best_epoch,
+                "best_val_loss": best_val_loss,
+                "history": history,
             },
-            f, indent=2,
+            f,
+            indent=2,
         )
 
-#-------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------
 # Public API used by main.py
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
 
 def generate_models():
     """
@@ -589,6 +601,6 @@ def retrain_models():
     """
     set_seed(cfg.seed)
     model = BlackboxModel().to(cfg.device)
-    model_path = os.path.join(cfg.model_save_path, f'{cfg.model_name}.pt')
+    model_path = os.path.join(cfg.model_save_path, f"{cfg.model_name}.pt")
     model.load_state_dict(torch.load(model_path, weights_only=True))
     train_model(model)

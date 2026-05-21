@@ -10,35 +10,34 @@ The architecture is designed to be versatile. The same pipeline can model any sy
 
 ### Requirements
 
-- Python 3.x (Tested with Python 3.8.17)
-- Libraries specified in `requirements.txt`
+- Python 3.8 or newer (originally developed against 3.8.17; works on 3.10+).
+- The libraries listed in `requirements.txt` — PyTorch, NumPy, pandas, SciPy, scikit-learn, Matplotlib, Seaborn, imageio, Pillow.
 
 ### Installation
 
-1. Clone this repository.
-    ```bash
-    git clone https://github.com/alex-spataru/blackbox
-    ```
-2. Navigate to the project directory.
-    ```bash
-    cd blackbox
-    ```
-3. Install the required libraries.
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+git clone https://github.com/alex-spataru/blackbox
+cd blackbox
+pip install -r requirements.txt
+```
 
 ### Usage
 
-To run the software, simply execute `main.py`:
+Run the interactive launcher:
 
 ```bash
 python main.py
 ```
 
-#### Prediction/experimental data comparison example
+If only one config file is present under `cfg/`, it's auto-selected; otherwise you'll be prompted. The menu exposes the full pipeline — preprocess raw data, train from scratch, retrain an existing checkpoint, compare predictions against experimental data, execute a test vector, run all test cases (and produce a GIF), or clean up generated files.
 
-![FNN prediction example](doc/fnn_comparison.jpg)
+#### Prediction/experimental data comparison
+
+In practice **the RNN backbone outperforms the FNN by a wide margin** on this dataset — lower closed-loop validation loss, cleaner trajectory shapes, and noticeably better robustness on held-out runs. Unless you have a deployment constraint that rules out a recurrent op (an embedded target with no state, ONNX export limitations, etc.), prefer `cfg/RNN.json`. The FNN configuration remains in the repo as a baseline and as a sanity check that the training framework itself is sound.
+
+The animation below shows the RNN's closed-loop predictions across every test case in sequence:
+
+![RNN predictions across all test cases](doc/test_cases.gif)
 
 ### NARX formulation
 
@@ -73,7 +72,7 @@ To bridge that gap, training uses **scheduled sampling**:
 2. `p` starts at `scheduled_sampling.start_prob` and decays linearly to `scheduled_sampling.end_prob` over `decay_epochs` epochs.
 3. A small Gaussian noise (`feedback_noise_std`) is added to the teacher-forced feedback. This trains the model to tolerate the imperfect feedback it will see at inference and is the single most effective regularizer against autoregressive drift.
 
-Validation and the held-out test split are always evaluated in fully closed-loop mode (`p = 0`), so the metric reflects how the model will actually be deployed.
+Validation and the held-out test split are always evaluated in fully closed-loop mode (`p = 0`), so the metric reflects how the model will actually be deployed. The held-out test loss is printed automatically at the end of training — there is no separate "run on test set" step.
 
 Other training-loop niceties worth mentioning:
 
@@ -141,6 +140,7 @@ blackbox/
 │   ├── Test Cases/          # Pre-filter CSVs used for the comparison plots
 │   └── Plots/               # PNG/JPG outputs from plotting.py
 │
+├── CLAUDE.md                # Working notes for AI collaborators (Claude Code)
 ├── config.py                # Configuration file loader
 ├── main.py                  # Main script to run the project
 └── requirements.txt         # Required libraries
@@ -197,6 +197,14 @@ blackbox/
 - `model_generator.py`: Model definition, the scheduled-sampling training loop, closed-loop evaluation, and split bookkeeping.
 - `plotting.py`: Utilities for plotting model predictions vs. experimental data.
 - `test_vector.py`: Parses `.def` test-vector files into a DataFrame of exogenous inputs.
+
+### Development
+
+Python sources are formatted with [black](https://github.com/psf/black) using its default settings. Before committing changes, run:
+
+```bash
+python -m black main.py config.py utils/*.py
+```
 
 ### License
 

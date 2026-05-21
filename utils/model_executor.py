@@ -41,11 +41,9 @@ class ModelExecutor:
         """
         Loads the best checkpoint from disk in eval mode.
         """
-        model_path = os.path.join(cfg.model_save_path, f'{cfg.model_name}.pt')
+        model_path = os.path.join(cfg.model_save_path, f"{cfg.model_name}.pt")
         self.model = BlackboxModel().to(cfg.device)
-        self.model.load_state_dict(
-            torch.load(model_path, weights_only=True)
-        )
+        self.model.load_state_dict(torch.load(model_path, weights_only=True))
         self.model.eval()
 
     def predict(self, df):
@@ -80,17 +78,15 @@ class ModelExecutor:
 
         with torch.no_grad():
             for t in range(T):
-                feedback_features = compute_feedback_features(
-                    y_history, num_derivs
-                )
+                feedback_features = compute_feedback_features(y_history, num_derivs)
                 x_t = torch.cat([exogenous[t]] + feedback_features, dim=0)
 
                 if cfg.rnn:
-                    x_in = x_t.unsqueeze(0).unsqueeze(0)   # (1, 1, input_dim)
+                    x_in = x_t.unsqueeze(0).unsqueeze(0)  # (1, 1, input_dim)
                     y_step, hidden_state = self.model(x_in, hidden_state)
                     y_step = y_step.squeeze(0).squeeze(0)
                 else:
-                    x_in = x_t.unsqueeze(0)                # (1, input_dim)
+                    x_in = x_t.unsqueeze(0)  # (1, input_dim)
                     y_step = self.model(x_in).squeeze(0)
 
                 preds_tensor[t] = y_step

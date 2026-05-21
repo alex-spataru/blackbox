@@ -1,16 +1,16 @@
-# 
+#
 # Copyright (c) 2023 Alex Spataru <https://github.com/alex-spataru>
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the 'Software'), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -18,7 +18,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-# 
+#
 
 import os
 import json
@@ -29,20 +29,20 @@ import pandas as pd
 import config as cfg
 from PIL import Image
 
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 # Global parameters
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 
 ## Text displayed in the main menu
-LOGO_TEXT = '''
+LOGO_TEXT = """
      __     __              __    __                
     / /_   / /____ _ _____ / /__ / /_   ____   _  __
    / __ \ / // __ `// ___// //_// __ \ / __ \ | |/_/
   / /_/ // // /_/ // /__ / ,<  / /_/ // /_/ /_>  <  
  /_.___//_/ \__,_/ \___//_/|_|/_.___/ \____//_/|_|                                               
-    '''
+    """
 
-MENU_TEXT = '''                                              
+MENU_TEXT = """                                              
     1. Process experimental data
     2. Generate model from scratch
     3. Re-train exisiting model
@@ -51,56 +51,72 @@ MENU_TEXT = '''
     6. Run all test cases
     7. Delete all generated files
     8. Exit
-    '''
+    """
 
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 # Utility functions
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
 
 def pause():
     """
     Pause execution and wait for the user to press Enter.
     """
-    print('')
+    print("")
     input("Press Enter to continue...")
+
 
 def clear_screen():
     """
     Clear the terminal screen.
     """
-    os.system('cls' if os.name == 'nt' else 'clear')
+    os.system("cls" if os.name == "nt" else "clear")
+
 
 def create_gif(image_folder, gif_path, duration=1.0):
     """
     @brief Create a GIF from JPG files in a folder.
-    
+
     @param image_folder: str, Path to the folder containing the JPG files.
     @param gif_path: str, Path where the GIF will be saved.
     @param duration: float, Duration each image will be displayed in the GIF.
     """
     # Sort the files to ensure they are in the correct order
     skip_frames = 2
-    image_files = sorted([img for img in os.listdir(image_folder) if img.endswith(".jpg")])[::skip_frames]
-    
+    image_files = sorted(
+        [img for img in os.listdir(image_folder) if img.endswith(".jpg")]
+    )[::skip_frames]
+
     # Create a list to hold image data
     images = []
-    
+
     # Read each image file and append to images list
     scale = 0.5
-    print(f'-> Reading images in {image_folder}...')
+    print(f"-> Reading images in {image_folder}...")
     for file_name in image_files:
         file_path = os.path.join(image_folder, file_name)
         img = Image.open(file_path)
-        img_resized = img.resize((int(img.width * scale), int(img.height * scale)), Image.LANCZOS)
+        img_resized = img.resize(
+            (int(img.width * scale), int(img.height * scale)), Image.LANCZOS
+        )
         images.append(img_resized)
-    
-    # Save images as a GIF
-    print(f'-> Generating {gif_path}')
-    images[0].save(gif_path, save_all=True, append_images=images[1:], optimize=True, duration=duration*1000, loop=0)
 
-#-------------------------------------------------------------------------------
+    # Save images as a GIF
+    print(f"-> Generating {gif_path}")
+    images[0].save(
+        gif_path,
+        save_all=True,
+        append_images=images[1:],
+        optimize=True,
+        duration=duration * 1000,
+        loop=0,
+    )
+
+
+# -------------------------------------------------------------------------------
 # Main menu loop
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
 
 def main_menu(selected_config_file):
     """Main menu for user interaction."""
@@ -109,37 +125,39 @@ def main_menu(selected_config_file):
     from utils.model_generator import generate_models
 
     menu_options = {
-        '1': preprocess_data,
-        '2': generate_models,
-        '3': retrain_models,
-        '4': compare_predictions_with_experimental_data,
-        '5': execute_test_vector,
-        '6': predict_all,
-        '7': delete_generated_files,
-        '8': exit,
-        'q': exit
+        "1": preprocess_data,
+        "2": generate_models,
+        "3": retrain_models,
+        "4": compare_predictions_with_experimental_data,
+        "5": execute_test_vector,
+        "6": predict_all,
+        "7": delete_generated_files,
+        "8": exit,
+        "q": exit,
     }
 
-    config_name = selected_config_file.replace('.json', '')
-    
+    config_name = selected_config_file.replace(".json", "")
+
     while True:
         clear_screen()
         print(LOGO_TEXT)
         print(MENU_TEXT)
-        choice = input(f'({config_name}) Select an option: ')
+        choice = input(f"({config_name}) Select an option: ")
 
         if choice in menu_options:
-            print('')
+            print("")
             menu_options[choice]()
             if choice != 8:
                 pause()
         else:
-            print('Invalid choice, please try again...')
+            print("Invalid choice, please try again...")
             time.sleep(3)
 
-#-------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------
 # Implementation functions for each option of the main menu
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
 
 def compare_predictions_with_experimental_data():
     from utils.model_executor import ModelExecutor
@@ -149,24 +167,25 @@ def compare_predictions_with_experimental_data():
     This function reads a specific test case file, uses the ModelExecutor class 
     to make predictions and then plots these predictions for comparison.
     """
-    test_case = input('Enter the test case CSV filename (without extension): ')
+    test_case = input("Enter the test case CSV filename (without extension): ")
     # Prefer held-out files for honest comparison; fall back to training data
     # so the menu option still works for ad-hoc inspection.
     candidates = [
-        os.path.join(cfg.held_out_path, test_case + '.csv'),
-        os.path.join(cfg.training_data_path, test_case + '.csv'),
+        os.path.join(cfg.held_out_path, test_case + ".csv"),
+        os.path.join(cfg.training_data_path, test_case + ".csv"),
     ]
     segment_path = next((p for p in candidates if os.path.exists(p)), None)
 
     if segment_path is not None:
         clear_screen()
         executor = ModelExecutor()
-        df = pd.read_csv(segment_path, encoding=cfg.csv_encoding).astype('float32')
+        df = pd.read_csv(segment_path, encoding=cfg.csv_encoding).astype("float32")
         predictions = executor.predict(df)
         plot_comparison(df, predictions, test_case, False)
 
     else:
-        print(f'Test case CSV {test_case} not found in held-out or training data!')
+        print(f"Test case CSV {test_case} not found in held-out or training data!")
+
 
 def execute_test_vector():
     from utils.test_vector import parse_def_file
@@ -177,9 +196,9 @@ def execute_test_vector():
     The function reads a user-specified test vector file, makes  predictions 
     using the ModelExecutor class, and then plots the results.
     """
-    tvname = input('Enter the test vector filename (without extension): ')
-    tvpath = os.path.join(cfg.test_vectors_path, tvname + '.def')
-    
+    tvname = input("Enter the test vector filename (without extension): ")
+    tvpath = os.path.join(cfg.test_vectors_path, tvname + ".def")
+
     if os.path.exists(tvpath):
         df = parse_def_file(tvpath)
         time.sleep(3)
@@ -189,7 +208,8 @@ def execute_test_vector():
         plot_test_vector(df, predictions, tvname)
 
     else:
-        print('Test vector file not found!')
+        print("Test vector file not found!")
+
 
 def predict_all():
     from utils.model_executor import ModelExecutor
@@ -204,11 +224,11 @@ def predict_all():
     executor = ModelExecutor()
 
     # Plot all test cases
-    csv_files = [f for f in os.listdir(cfg.test_cases_path) if f.endswith('.csv')]
+    csv_files = [f for f in os.listdir(cfg.test_cases_path) if f.endswith(".csv")]
     for case in sorted(csv_files):
         csv = os.path.join(cfg.test_cases_path, case)
         print(f'-> Running predictions for "{csv}"')
-        df = pd.read_csv(csv, encoding=cfg.csv_encoding).astype('float32')
+        df = pd.read_csv(csv, encoding=cfg.csv_encoding).astype("float32")
         predictions = executor.predict(df)
         plot_comparison(df, predictions, case, True)
 
@@ -217,9 +237,10 @@ def predict_all():
     gif_path = os.path.join(cfg.plot_save_path, "../test_cases.gif")
     create_gif(image_folder, gif_path, duration=0.1)
 
+
 def delete_generated_files():
     """
-    Cleans up files generated during the model's workflow, such as saved models, 
+    Cleans up files generated during the model's workflow, such as saved models,
     images, and test cases.
     """
     paths_to_clean = [
@@ -230,54 +251,58 @@ def delete_generated_files():
         cfg.held_out_path,
     ]
 
-    ack = input('Are you sure (y/n): ').strip().lower()
+    ack = input("Are you sure (y/n): ").strip().lower()
 
-    if ack == 'y':
+    if ack == "y":
         for path in paths_to_clean:
             if os.path.exists(path):
                 if os.path.isfile(path):
                     os.remove(path)
                 else:
                     shutil.rmtree(path)
-                print(f'-> Deleted {path}')
+                print(f"-> Deleted {path}")
             else:
-                print(f'-> {path} does not exist.')
+                print(f"-> {path} does not exist.")
 
-    elif ack != 'n':
-        print('Invalid response...')
+    elif ack != "n":
+        print("Invalid response...")
 
-#-------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------
 # Configuration loading code
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 
-def list_config_files(directory='cfg'):
+
+def list_config_files(directory="cfg"):
     """
     List available configuration files in the specified directory.
 
     @param directory: Directory where the JSON configuration files are stored.
-    @return: A list of available configuration files 
+    @return: A list of available configuration files
     """
-    config_files = [f for f in os.listdir(directory) if f.endswith('.json')]
+    config_files = [f for f in os.listdir(directory) if f.endswith(".json")]
     named_configs = {}
     for config_file in config_files:
-        with open(os.path.join(directory, config_file), 'r') as f:
+        with open(os.path.join(directory, config_file), "r") as f:
             data = json.load(f)
-            name = data.get('name', 'Unnamed')
+            name = data.get("name", "Unnamed")
         named_configs[config_file] = name
 
     return named_configs
 
 
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 # Automatically call main_menu() when script is executed
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Automatically select the config if only one is available
     available_configs = list_config_files()
     if len(available_configs) == 1:
         selected_config_file = list(available_configs.keys())[0]
-        print(f'Automatically selected config: {available_configs[selected_config_file]}')
+        print(
+            f"Automatically selected config: {available_configs[selected_config_file]}"
+        )
 
     # Multiple config files available, ask for user input
     elif len(available_configs) > 1:
@@ -285,18 +310,18 @@ if __name__ == '__main__':
         clear_screen()
         print(LOGO_TEXT)
         for idx, (filename, name) in enumerate(available_configs.items(), 1):
-            print(f'    {idx}. {name}')
-        
+            print(f"    {idx}. {name}")
+
         # Print exit option
         idx = len(available_configs) + 1
-        print(f'    {idx}. Exit\n')
+        print(f"    {idx}. Exit\n")
 
         # Validate user response
-        choice = int(input('Select a configuration: ')) - 1
+        choice = int(input("Select a configuration: ")) - 1
         if choice == len(available_configs):
             exit(0)
         elif choice < 0 or choice >= len(available_configs):
-            print('Invalid selection. Exiting program.')
+            print("Invalid selection. Exiting program.")
             exit(1)
 
         # Load configuration
@@ -304,14 +329,14 @@ if __name__ == '__main__':
 
     # No files found...
     else:
-        print(f'Error: cannot load application config.json file!')
+        print(f"Error: cannot load application config.json file!")
         exit(1)
 
     # Load configuration file & seed RNGs for reproducibility
-    cfg.load_config(os.path.join('cfg', selected_config_file))
+    cfg.load_config(os.path.join("cfg", selected_config_file))
     from utils.model_generator import set_seed
+
     set_seed(cfg.seed)
 
     # Show main menu
     main_menu(selected_config_file)
-

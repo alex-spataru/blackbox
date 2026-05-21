@@ -22,52 +22,53 @@
 
 import json
 
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 # Initialize global application-wise variables
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 
-rnn = None                          # Enable use of RNN networks
-seed = None                         # RNG seed for reproducibility
-units = None                        # Units for each input/output parameter
-device = None                       # Device to use (e.g. CPU, MPS, etc)
-inputs = None                       # Inputs of the system to predict
-outputs = None                      # Outputs of the system to predict
-lp_filter = None                    # Low-pass filter options
-max_epochs = None                   # Max number of epochs to train the model
-model_name = None                   # Name of the model
-batch_size = None                   # Batch size used during training
-val_ratio = None                    # Fraction of experiment CSVs held out for validation
-test_ratio = None                   # Fraction of experiment CSVs held out for testing
-axis_labels = None                  # Axis labels
-dropout_rate = None                 # Dropout rate between the RNN & the output
-weight_decay = None                 # L2 regularization weight decay
-csv_encoding = None                 # Encoding used to load/save CSVs
-hidden_layers = None                # Hidden layers of the RNN
-learning_rate = None                # Learning rate of the optimizer
-raw_data_path = None                # Path with experimental data CSVs
-plot_save_path = None               # Path in which to save generated plots
-gaussian_filter = None              # Signals to filter using a Gaussian filter
-num_derivatives = None              # Number of derivatives used for each output
-operation_modes = None              # Dictionary to split data into test cases
-model_save_path = None              # Path in which to save the generated model
-test_cases_path = None              # Path in which to save separated test cases
-constant_signals = None             # Columns to average & set to constant
-test_vectors_path = None            # Path where user-defined tests are stored
-neurons_per_layer = None            # Number of neurons per layer of the model
-training_data_path = None           # Where to store filtered training data
-held_out_path = None                # Where to save the held-out evaluation split
-early_stop_patience = None          # Number of stalled epochs to wait
-early_stop_threshold = None         # Threshold to detect a stalled training
-normalization_parameters = None     # Normalization values for each input/output
-scheduled_sampling = None           # Mixing schedule between teacher forcing and free running
-lr_scheduler = None                 # ReduceLROnPlateau hyperparameters
-val_smoothing = None                # EMA factor for smoothing the val loss (0 disables)
-grad_clip = None                    # Max gradient norm for clipping
-feedback_noise_std = None           # Std-dev of Gaussian noise added to teacher-forced feedback
+rnn = None  # Enable use of RNN networks
+seed = None  # RNG seed for reproducibility
+units = None  # Units for each input/output parameter
+device = None  # Device to use (e.g. CPU, MPS, etc)
+inputs = None  # Inputs of the system to predict
+outputs = None  # Outputs of the system to predict
+lp_filter = None  # Low-pass filter options
+max_epochs = None  # Max number of epochs to train the model
+model_name = None  # Name of the model
+batch_size = None  # Batch size used during training
+val_ratio = None  # Fraction of experiment CSVs held out for validation
+test_ratio = None  # Fraction of experiment CSVs held out for testing
+axis_labels = None  # Axis labels
+dropout_rate = None  # Dropout rate between the RNN & the output
+weight_decay = None  # L2 regularization weight decay
+csv_encoding = None  # Encoding used to load/save CSVs
+hidden_layers = None  # Hidden layers of the RNN
+learning_rate = None  # Learning rate of the optimizer
+raw_data_path = None  # Path with experimental data CSVs
+plot_save_path = None  # Path in which to save generated plots
+gaussian_filter = None  # Signals to filter using a Gaussian filter
+num_derivatives = None  # Number of derivatives used for each output
+operation_modes = None  # Dictionary to split data into test cases
+model_save_path = None  # Path in which to save the generated model
+test_cases_path = None  # Path in which to save separated test cases
+constant_signals = None  # Columns to average & set to constant
+test_vectors_path = None  # Path where user-defined tests are stored
+neurons_per_layer = None  # Number of neurons per layer of the model
+training_data_path = None  # Where to store filtered training data
+held_out_path = None  # Where to save the held-out evaluation split
+early_stop_patience = None  # Number of stalled epochs to wait
+early_stop_threshold = None  # Threshold to detect a stalled training
+normalization_parameters = None  # Normalization values for each input/output
+scheduled_sampling = None  # Mixing schedule between teacher forcing and free running
+lr_scheduler = None  # ReduceLROnPlateau hyperparameters
+val_smoothing = None  # EMA factor for smoothing the val loss (0 disables)
+grad_clip = None  # Max gradient norm for clipping
+feedback_noise_std = None  # Std-dev of Gaussian noise added to teacher-forced feedback
 
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 # Load application configuration variables from a JSON file
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
+
 
 def load_config(file_path):
     """
@@ -115,69 +116,74 @@ def load_config(file_path):
     global feedback_noise_std
 
     # Parse JSON file
-    with open(file_path, 'r') as f:
+    with open(file_path, "r") as f:
         config_data = json.load(f)
 
     # Read data from JSON file (required fields)
-    rnn = config_data['rnn']
-    units = config_data['units']
-    device = config_data['device']
-    inputs = config_data['inputs']
-    outputs = config_data['outputs']
-    lp_filter = config_data['lp_filter']
-    max_epochs = config_data['max_epochs']
-    batch_size = config_data['batch_size']
-    axis_labels = config_data['axis_labels']
-    csv_encoding = config_data['csv_encoding']
-    dropout_rate = config_data['dropout_rate']
-    weight_decay = config_data['weight_decay']
-    hidden_layers = config_data['hidden_layers']
-    learning_rate = config_data['learning_rate']
-    raw_data_path = config_data['raw_data_path']
-    plot_save_path = config_data['plot_save_path']
-    gaussian_filter = config_data['gaussian_filter']
-    operation_modes = config_data['operation_modes']
-    num_derivatives = config_data['num_derivatives']
-    model_save_path = config_data['model_save_path']
-    test_cases_path = config_data['test_cases_path']
-    constant_signals = config_data['constant_signals']
-    test_vectors_path = config_data['test_vectors_path']
-    neurons_per_layer = config_data['neurons_per_layer']
-    training_data_path = config_data['training_data_path']
-    early_stop_patience = config_data['early_stop_patience']
-    early_stop_threshold = config_data['early_stop_threshold']
-    normalization_parameters = config_data['normalization_parameters']
+    rnn = config_data["rnn"]
+    units = config_data["units"]
+    device = config_data["device"]
+    inputs = config_data["inputs"]
+    outputs = config_data["outputs"]
+    lp_filter = config_data["lp_filter"]
+    max_epochs = config_data["max_epochs"]
+    batch_size = config_data["batch_size"]
+    axis_labels = config_data["axis_labels"]
+    csv_encoding = config_data["csv_encoding"]
+    dropout_rate = config_data["dropout_rate"]
+    weight_decay = config_data["weight_decay"]
+    hidden_layers = config_data["hidden_layers"]
+    learning_rate = config_data["learning_rate"]
+    raw_data_path = config_data["raw_data_path"]
+    plot_save_path = config_data["plot_save_path"]
+    gaussian_filter = config_data["gaussian_filter"]
+    operation_modes = config_data["operation_modes"]
+    num_derivatives = config_data["num_derivatives"]
+    model_save_path = config_data["model_save_path"]
+    test_cases_path = config_data["test_cases_path"]
+    constant_signals = config_data["constant_signals"]
+    test_vectors_path = config_data["test_vectors_path"]
+    neurons_per_layer = config_data["neurons_per_layer"]
+    training_data_path = config_data["training_data_path"]
+    early_stop_patience = config_data["early_stop_patience"]
+    early_stop_threshold = config_data["early_stop_threshold"]
+    normalization_parameters = config_data["normalization_parameters"]
 
     # Read optional fields with sensible defaults so existing configs keep working
-    seed = config_data.get('seed', 42)
-    val_ratio = config_data.get('val_ratio', 0.15)
-    test_ratio = config_data.get('test_ratio', 0.15)
+    seed = config_data.get("seed", 42)
+    val_ratio = config_data.get("val_ratio", 0.15)
+    test_ratio = config_data.get("test_ratio", 0.15)
     held_out_path = config_data.get(
-        'held_out_path',
-        training_data_path.rstrip('/').rstrip('\\') + '_HeldOut'
+        "held_out_path", training_data_path.rstrip("/").rstrip("\\") + "_HeldOut"
     )
-    scheduled_sampling = config_data.get('scheduled_sampling', {
-        'start_prob': 1.0,    # P(teacher forcing) at epoch 0
-        'end_prob': 0.5,      # P(teacher forcing) once the schedule decays
-        'decay_epochs': 30,   # Epochs over which to linearly decay start -> end
-    })
-    lr_scheduler = config_data.get('lr_scheduler', {
-        'factor': 0.5,        # Multiplicative LR cut when plateau detected
-        'patience': 4,        # Epochs with no val-loss improvement before a cut
-        'min_lr': 1e-6,       # Floor for the LR
-    })
+    scheduled_sampling = config_data.get(
+        "scheduled_sampling",
+        {
+            "start_prob": 1.0,  # P(teacher forcing) at epoch 0
+            "end_prob": 0.5,  # P(teacher forcing) once the schedule decays
+            "decay_epochs": 30,  # Epochs over which to linearly decay start -> end
+        },
+    )
+    lr_scheduler = config_data.get(
+        "lr_scheduler",
+        {
+            "factor": 0.5,  # Multiplicative LR cut when plateau detected
+            "patience": 4,  # Epochs with no val-loss improvement before a cut
+            "min_lr": 1e-6,  # Floor for the LR
+        },
+    )
     # EMA factor in [0, 1) for smoothing val loss before LR scheduling /
     # early-stopping decisions. 0.0 disables smoothing (raw signal).
-    val_smoothing = float(config_data.get('val_smoothing', 0.0))
+    val_smoothing = float(config_data.get("val_smoothing", 0.0))
     # Max L2 norm for gradient clipping. Set high to effectively disable.
-    grad_clip = float(config_data.get('grad_clip', 1.0))
+    grad_clip = float(config_data.get("grad_clip", 1.0))
     # Std-dev of Gaussian noise added to teacher-forced feedback during
     # training. Targets are normalised to ~[0, 1], so 0.01 is ~1% drift.
     # Trains the model to be robust to imperfect feedback at inference.
-    feedback_noise_std = float(config_data.get('feedback_noise_std', 0.0))
+    feedback_noise_std = float(config_data.get("feedback_noise_std", 0.0))
 
     # Set model name
     if rnn:
-        model_name = 'RNN_Model'
+        model_name = "RNN_Model"
     else:
         model_name = "FNN_Model"
